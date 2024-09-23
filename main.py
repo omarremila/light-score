@@ -41,6 +41,16 @@ def geocode_address(address):
             return location['lat'], location['lng']
     return None, None
 
+# Function to get sunlight data (using a placeholder API or dataset for solar radiation)
+def get_sunlight_data(lat, lng):
+    # Placeholder for actual sunlight data API
+    return random.uniform(0, 100)  # Replace with actual API call
+
+# Function to account for nearby building obstructions
+def get_obstruction_factor(lat, lng):
+    # Placeholder for actual building data API
+    return random.uniform(0, 1)  # 0 means no obstruction, 1 means full obstruction
+
 @app.get("/light_score/")
 def get_light_score(
     country: str,
