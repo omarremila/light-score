@@ -59,7 +59,7 @@ def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
 def geocode_address(address):
-    api_key = 'pk.68d59be44a490cd6237c99dbe3ff62e2'
+    api_key = '#####'
     base_url = f"https://us1.locationiq.com/v1/search.php?key={api_key}"
     params = {
         'q': address,
