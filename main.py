@@ -30,15 +30,18 @@ def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
 def geocode_address(address):
-    api_key = 'YOUR_API_KEY'
-    base_url = "https://maps.googleapis.com/maps/api/geocode/json"
-    endpoint = f"{base_url}?address={address}&key={api_key}"
-    response = requests.get(endpoint)
+    api_key = 'API KEY'
+    base_url = f"https://us1.locationiq.com/v1/search.php?key={api_key}"
+    params = {
+        'q': address,
+        'format': 'json',
+        'limit': 1
+    }
+    response = requests.get(base_url, params=params)
     if response.status_code == 200:
-        results = response.json()['results']
-        if results:
-            location = results[0]['geometry']['location']
-            return location['lat'], location['lng']
+        data = response.json()
+        if data:
+            return data[0]['lat'], data[0]['lon']
     return None, None
 
 # Function to get sunlight data (using a placeholder API or dataset for solar radiation)
@@ -59,8 +62,11 @@ def get_light_score(
     street_number: str,
     floor: Union[str, None] = None
 ):
+    address = f"{street_number}, {city}, {postal_code}, {country}"
+    lat, lng = geocode_address(address)  # Get latitude and longitude
     # Generate a random score between 0 and 100
     light_score = random.randint(0, 100)
+    # Return lat, lng, and light score in the response
     return {
         "country": country,
         "city": city,
@@ -68,5 +74,6 @@ def get_light_score(
         "street_number": street_number,
         "floor": floor,
         "light_score": light_score,
-     
+        "lat": lat,
+        "lng": lng,
     }
