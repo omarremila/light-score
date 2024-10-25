@@ -1,15 +1,22 @@
 from typing import Union
 import random
-
+import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+# Configure CORS
 origins = [
-    "http://localhost:5173",  # Add other origins as needed
+    "http://localhost:5173",  # Your frontend URL
 ]
-import requests
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 
