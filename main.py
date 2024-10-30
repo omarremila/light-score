@@ -3,7 +3,8 @@ import random
 import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import json
+import os
+
 def calculate_sunlight_score(data):
     """
     Calculate the average sunlight score for the entire dataset.
@@ -36,7 +37,9 @@ def calculate_sunlight_score(data):
 app = FastAPI()
 # Configure CORS
 origins = [
-    "http://localhost:5173",  # Your frontend URL
+    "http://localhost:5173",  
+    "https://light-score-production.up.railway.app"  #  Railway backend URL
+
 ]
 
 app.add_middleware(
@@ -59,7 +62,7 @@ def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
 def geocode_address(address):
-    api_key = 'REMOVED_API_KEY'
+    api_key = os.getenv('api_key')
     base_url = f"https://us1.locationiq.com/v1/search.php?key={api_key}"
     params = {
         'q': address,
@@ -73,7 +76,7 @@ def geocode_address(address):
             return data[0]['lat'], data[0]['lon']
     return None, None
 
-weatherbit_api_key = "***REMOVED***"
+weatherbit_api_key = os.getenv('weatherbit_api_key')
 
 def get_sunlight_data(lat, lon,start_date,end_date):
     url = f"https://api.weatherbit.io/v2.0/history/energy?lat={lat}&lon={lon}&start_date={start_date}&end_date={end_date}&key={weatherbit_api_key}"
