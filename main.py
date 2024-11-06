@@ -163,6 +163,7 @@ def read_root():
     return {"status": "healthy", "service": "light-score-api"}
 
 @app.get("/light_score/")
+@app.get("/light_score/")
 async def get_light_score(
     country: str,
     city: str,
@@ -173,9 +174,7 @@ async def get_light_score(
     start_date: Union[str, None] = None,
     end_date: Union[str, None] = None
 ):
-    """
-    Calculate light score for a given address and date range.
-    """
+    """Calculate light score for a given address and date range."""
     # Validate required fields
     if not all([country, city, street_name, street_number]):
         raise HTTPException(
@@ -216,6 +215,7 @@ async def get_light_score(
                 adjustment = min(floor_num * 2, 20)
                 light_score = min(100, light_score + adjustment)
 
+        # Return the result
         return {
             "country": country,
             "city": city,
@@ -227,4 +227,14 @@ async def get_light_score(
             "lat": lat,
             "lng": lng,
             "start_date": start_date,
-            "end_date": end_date,
+            "end_date": end_date
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in light score calculation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while calculating the light score"
+        )
