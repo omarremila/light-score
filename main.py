@@ -37,7 +37,7 @@ def calculate_sunlight_score(data):
 app = FastAPI()
 # Configure CORS
 origins = [
-    "http://localhost:5173",  
+    "https://ligh-score-production.up.railway.app/light-score",  
     "https://light-score-production.up.railway.app"  #  Railway backend URL
 
 ]
