@@ -163,7 +163,13 @@ def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) ->
 def read_root():
     return {"status": "healthy", "service": "light-score-api"}
 
-@app.get("/light_score/")
+@app.middleware("http")
+async def log_cors_headers(request, call_next):
+    response = await call_next(request)
+    logger.info(f"Origin: {request.headers.get('origin')}")
+    logger.info(f"Access-Control-Allow-Origin: {response.headers.get('access-control-allow-origin')}")
+    return response
+
 @app.get("/light_score/")
 async def get_light_score(
     country: str,
