@@ -29,6 +29,125 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "https://ligh-score-production.up.railway.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+# Add OPTIONS endpoint to handle preflight requests
+@app.options("/{path:path}")
+async def options_handler(request: Request, path: str):
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "https://ligh-score-production.up.railway.app",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+@app.get("/")
+def read_root():
+    return {"status": "healthy", "service": "light-score-api"}
+def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
+    """
+    Geocode an address using LocationIQ API.
+    
+    :param address: The address to geocode
+    :return: Tuple of (latitude, longitude) or (None, None) if geocoding fails
+    """
+    api_key = os.getenv('api_key')
+    if not api_key:
+        logger.error("LocationIQ API key not found in environment variables")
+        return None, None
+
+    try:
+        base_url = "https://us1.locationiq.com/v1/search.php"
+        params = {
+            'key': api_key,
+            'q': address,
+            'format': 'json',
+            'limit': 1
+        }
+        
+        logger.info(f"Geocoding address: {address}")
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+
+        data = response.json()
+        if data and isinstance(data, list) and len(data) > 0:
+            return float(data[0]['lat']), float(data[0]['lon'])
+        
+        logger.warning("No geocoding results found")
+        return None, None
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Geocoding API error: {e}")
+        return None, None
+    except (KeyError, ValueError, TypeError) as e:
+        logger.error(f"Error parsing geocoding response: {e}")
+        return None, None
+
+
+
+def buildings_nearby(path_to_shp, target_lat, target_long, min_height, direction, search_area=200):
+    # Read shapefile
+    df = gpd.read_file(path_to_shp)
+    threshold = search_area / 111111
+    # Calculate differences vectorially
+    df['lat_diff'] = df['LATITUDE'] - target_lat
+    df['long_diff'] = df['LONGITUDE'] - target_long
+    
+    # Calculate distance vectorially
+    df['distance'] = np.sqrt(df['lat_diff']**2 + df['long_diff']**2)
+    
+    # Initial filtering using boolean masks
+    mask = (
+        (df['lat_diff'].abs() < threshold) & 
+        (df['long_diff'].abs() < threshold) & 
+        (df['AVG_HEIGHT'].astype(float) > min_height)
+    )
+    
+    # Direction filtering
+    if direction == 'N':
+        mask &= (df['lat_diff'] > 0)
+    elif direction == 'S':
+        mask &= (df['lat_diff'] < 0)
+    elif direction == 'E':
+        mask &= (df['long_diff'] > 0)
+    elif direction == 'W':
+        mask &= (df['long_diff'] < 0)
+    elif direction == 'NE':
+        mask &= (df['lat_diff'] > 0) & (df['long_diff'] > 0)
+    elif direction == 'NW':
+        mask &= (df['lat_diff'] > 0) & (df['long_diff'] < 0)
+    elif direction == 'SE':
+        mask &= (df['lat_diff'] < 0) & (df['long_diff'] > 0)
+    elif direction == 'SW':
+        mask &= (df['lat_diff'] < 0) & (df['long_diff'] < 0)
+    
+    # Apply all filters at once
+    filtered_df = df[mask].copy()
+    
+    # Select and rename columns
+    result_df = filtered_df[[
+        'LATITUDE', 'LONGITUDE', 'AVG_HEIGHT', 
+        'lat_diff', 'long_diff', 'distance'
+    ]].rename(columns={
+        'AVG_HEIGHT': 'height'
+    })
+    
+    # Take absolute values of differences
+    result_df['lat_diff'] = result_df['lat_diff'].abs()
+    result_df['long_diff'] = result_df['long_diff'].abs()
+    
+    # Sort by distance
+    return result_df.sort_values('distance')
+
+
 def calculate_sunlight_score(data):
     """
     Calculate the average sunlight score for the entire dataset.
@@ -75,44 +194,6 @@ def calculate_sunlight_score(data):
         logger.error(f"Error calculating sunlight score: {e}")
         return -1
 
-def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
-    """
-    Geocode an address using LocationIQ API.
-    
-    :param address: The address to geocode
-    :return: Tuple of (latitude, longitude) or (None, None) if geocoding fails
-    """
-    api_key = os.getenv('api_key')
-    if not api_key:
-        logger.error("LocationIQ API key not found in environment variables")
-        return None, None
-
-    try:
-        base_url = "https://us1.locationiq.com/v1/search.php"
-        params = {
-            'key': api_key,
-            'q': address,
-            'format': 'json',
-            'limit': 1
-        }
-        
-        logger.info(f"Geocoding address: {address}")
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-
-        data = response.json()
-        if data and isinstance(data, list) and len(data) > 0:
-            return float(data[0]['lat']), float(data[0]['lon'])
-        
-        logger.warning("No geocoding results found")
-        return None, None
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Geocoding API error: {e}")
-        return None, None
-    except (KeyError, ValueError, TypeError) as e:
-        logger.error(f"Error parsing geocoding response: {e}")
-        return None, None
 
 def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) -> float:
     """
@@ -158,30 +239,7 @@ def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) ->
     except Exception as e:
         logger.error(f"Error processing weather data: {e}")
         return -1
-@app.middleware("http")
-async def cors_middleware(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "https://ligh-score-production.up.railway.app"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
 
-# Add OPTIONS endpoint to handle preflight requests
-@app.options("/{path:path}")
-async def options_handler(request: Request, path: str):
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "https://ligh-score-production.up.railway.app",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Credentials": "true",
-        }
-    )
-@app.get("/")
-def read_root():
-    return {"status": "healthy", "service": "light-score-api"}
 
 
 @app.get("/light_score/")
