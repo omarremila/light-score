@@ -18,6 +18,7 @@ app = FastAPI()
 origins = [
     "https://light-score-production.up.railway.app",
     "http://localhost:5173",  # Local development
+    "https://ligh-score-production.up.railway.app/"
 ]
 
 app.add_middleware(
