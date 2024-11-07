@@ -7,6 +7,7 @@ import os
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
+from fastapi import Request
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -16,14 +17,13 @@ app = FastAPI()
 
 # Configure CORS
 origins = [
-    "https://light-score-production.up.railway.app",
-    "http://localhost:5173",  # Local development
-    "https://ligh-score-production.up.railway.app/"
+    "https://sun-light-strength.up.railway.app/",
+    "http://localhost:5173"  # Local development
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,17 +158,31 @@ def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) ->
     except Exception as e:
         logger.error(f"Error processing weather data: {e}")
         return -1
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "https://ligh-score-production.up.railway.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
+# Add OPTIONS endpoint to handle preflight requests
+@app.options("/{path:path}")
+async def options_handler(request: Request, path: str):
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "https://ligh-score-production.up.railway.app",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 @app.get("/")
 def read_root():
     return {"status": "healthy", "service": "light-score-api"}
 
-@app.middleware("http")
-async def log_cors_headers(request, call_next):
-    response = await call_next(request)
-    logger.info(f"Origin: {request.headers.get('origin')}")
-    logger.info(f"Access-Control-Allow-Origin: {response.headers.get('access-control-allow-origin')}")
-    return response
 
 @app.get("/light_score/")
 async def get_light_score(
