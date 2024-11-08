@@ -32,7 +32,7 @@ app.add_middleware(
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = ""https://sun-light-strength.up.railway.app/""
+    response.headers["Access-Control-Allow-Origin"] = "https://sun-light-strength.up.railway.app/"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
@@ -43,7 +43,7 @@ async def options_handler(request: Request, path: str):
     return Response(
         status_code=200,
         headers={
-            "Access-Control-Allow-Origin": ""https://sun-light-strength.up.railway.app/"",
+            "Access-Control-Allow-Origin": "https://sun-light-strength.up.railway.app/",
             "Access-Control-Allow-Methods": "*",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",
