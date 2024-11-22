@@ -188,27 +188,32 @@ def get_sunlight_data(lat: float, lon: float, startDate: str, endDate: str) -> f
         params = {
             "lat": lat,
             "lon": lon,
-            "startDate": startDate,
-            "endDate": endDate,
+            "start_date": startDate,  # Fixed parameter name
+            "end_date": endDate,  # Fixed parameter name
             "key": api_key,
         }
 
-        logger.info(f"Requesting weather data for coordinates: {lat}, {lon}")
-        response = requests.get(url, params=params, timeout=15)  # Added timeout
-        response.raise_for_status()
+        logger.info(f"Requesting weather data with params: {params}")
+        response = requests.get(url, params=params, timeout=15)
 
-        data = response.json().get("data", [])
-        if not data:
-            logger.warning("No weather data received")
+        # Add more detailed logging
+        if not response.ok:
+            logger.error(
+                f"Weatherbit API error: {response.status_code} - {response.text}"
+            )
             return -1
 
-        return calculate_sunlight_score(data)
+        data = response.json()
+        logger.info(f"Received data from Weatherbit: {data}")
 
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Weather API error: {e}")
-        return -1
+        if not data.get("data"):
+            logger.warning("No data received from Weatherbit")
+            return -1
+
+        return calculate_sunlight_score(data.get("data", []))
+
     except Exception as e:
-        logger.error(f"Error processing weather data: {e}")
+        logger.error(f"Error in get_sunlight_data: {str(e)}")
         return -1
 
 
