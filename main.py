@@ -217,7 +217,7 @@ async def get_light_score(
     country: str,
     city: str,
     postalCode: str,  # Changed from postal_code
-    street_name: str,  # Changed from street_name
+    streetName: str,  # Changed from streetName
     streetNumber: str,  # Changed from streetNumber
     floor: Union[str, None] = None,
     startDate: Union[str, None] = None,  # Changed from start_date
@@ -226,10 +226,10 @@ async def get_light_score(
     """Calculate light score for a given address and date range."""
     try:
         # Validate required fields
-        if not all([country, city, street_name, streetNumber]):
+        if not all([country, city, streetName, streetNumber]):
             raise HTTPException(
                 status_code=400,
-                detail="Missing required fields: country, city, street_name, and streetNumber are required",
+                detail="Missing required fields: country, city, streetName, and streetNumber are required",
             )
 
         # Set default dates if not provided
@@ -239,7 +239,7 @@ async def get_light_score(
             end_date = today.strftime("%Y-%m-%d")
 
         # Format address and get coordinates
-        address = f"{streetNumber} {street_name}, {city}, {postal_code}, {country}"
+        address = f"{streetNumber} {streetName}, {city}, {postal_code}, {country}"
         lat, lng = geocode_address(address)
 
         if not lat or not lng:
@@ -266,7 +266,7 @@ async def get_light_score(
             "country": country,
             "city": city,
             "postal_code": postalCode,
-            "street_name": street_name,
+            "streetName": streetName,
             "streetNumber": streetNumber,
             "floor": floor,
             "light_score": light_score,
