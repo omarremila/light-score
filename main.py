@@ -174,7 +174,7 @@ def calculate_sunlight_score(data: list) -> float:
         return -1
 
 
-def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) -> float:
+def get_sunlight_data(lat: float, lon: float, startDate: str, endDate: str) -> float:
     """
     Get sunlight data from Weatherbit API.
     """
@@ -188,8 +188,8 @@ def get_sunlight_data(lat: float, lon: float, start_date: str, end_date: str) ->
         params = {
             "lat": lat,
             "lon": lon,
-            "start_date": start_date,
-            "end_date": end_date,
+            "startDate": startDate,
+            "endDate": endDate,
             "key": api_key,
         }
 
@@ -220,8 +220,8 @@ async def get_light_score(
     streetName: str,  # Changed from streetName
     streetNumber: str,  # Changed from streetNumber
     floor: Union[str, None] = None,
-    startDate: Union[str, None] = None,  # Changed from start_date
-    endDate: Union[str, None] = None,  # Changed from end_date
+    startDate: Union[str, None] = None,  # Changed from startDate
+    endDate: Union[str, None] = None,  # Changed from endDate
 ):
     """Calculate light score for a given address and date range."""
     try:
@@ -233,10 +233,10 @@ async def get_light_score(
             )
 
         # Set default dates if not provided
-        if not start_date or not end_date:
+        if not startDate or not endDate:
             today = datetime.now()
-            start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-            end_date = today.strftime("%Y-%m-%d")
+            startDate = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+            endDate = today.strftime("%Y-%m-%d")
 
         # Format address and get coordinates
         address = f"{streetNumber} {streetName}, {city}, {postal_code}, {country}"
@@ -249,7 +249,7 @@ async def get_light_score(
             )
 
         # Get light score
-        light_score = get_sunlight_data(lat, lng, start_date, end_date)
+        light_score = get_sunlight_data(lat, lng, startDate, endDate)
         if light_score == -1:
             raise HTTPException(
                 status_code=500, detail="Could not retrieve or calculate sunlight data"
@@ -272,8 +272,8 @@ async def get_light_score(
             "light_score": light_score,
             "lat": lat,
             "lng": lng,
-            "start_date": start_date,
-            "end_date": end_date,
+            "startDate": startDate,
+            "endDate": endDate,
         }
 
     except HTTPException as he:
