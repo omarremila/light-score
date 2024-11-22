@@ -216,7 +216,7 @@ def get_sunlight_data(lat: float, lon: float, startDate: str, endDate: str) -> f
 async def get_light_score(
     country: str,
     city: str,
-    postalCode: str,  # Changed from postal_code
+    postalCode: str,  # Changed from postalCode
     streetName: str,  # Changed from streetName
     streetNumber: str,  # Changed from streetNumber
     floor: Union[str, None] = None,
@@ -239,7 +239,7 @@ async def get_light_score(
             endDate = today.strftime("%Y-%m-%d")
 
         # Format address and get coordinates
-        address = f"{streetNumber} {streetName}, {city}, {postal_code}, {country}"
+        address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
         lat, lng = geocode_address(address)
 
         if not lat or not lng:
@@ -265,7 +265,7 @@ async def get_light_score(
         return {
             "country": country,
             "city": city,
-            "postal_code": postalCode,
+            "postalCode": postalCode,
             "streetName": streetName,
             "streetNumber": streetNumber,
             "floor": floor,
