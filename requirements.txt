@@ -14,3 +14,5 @@ requests
 numpy
 uvicorn
 fastapi  # if you're using FastAPI
+requests  # if you're making HTTP requests
+python-dotenv  # if you're using environment variables
