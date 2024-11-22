@@ -11,3 +11,6 @@ typing_extensions==4.12.2
 uvicorn
 motor
 requests
+numpy
+uvicorn
+fastapi  # if you're using FastAPI
