@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 from fastapi import Request
 import numpy as np
 import geopandas as gpd
+import math
+import geopy.distance
+import geopandas as gpd
+import pandas as pd
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Configure CORS - Simplified and corrected configuration
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -35,12 +39,10 @@ def read_root():
 
 
 def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
-    """
-    Geocode an address using LocationIQ API.
-    """
-    api_key = os.getenv("LOCATIONIQ_API_KEY")  # Updated environment variable name
+    """Geocode an address using LocationIQ API."""
+    api_key = os.getenv("LOCATIONIQ_API_KEY")
     if not api_key:
-        logger.error("LocationIQ API key not found in environment variables")
+        logger.error("LocationIQ API key not found")
         return None, None
 
     try:
@@ -48,193 +50,166 @@ def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
         params = {"key": api_key, "q": address, "format": "json", "limit": 1}
 
         logger.info(f"Geocoding address: {address}")
-        response = requests.get(base_url, params=params, timeout=10)  # Added timeout
+        response = requests.get(base_url, params=params, timeout=10)
         response.raise_for_status()
 
         data = response.json()
         if data and isinstance(data, list) and len(data) > 0:
             return float(data[0]["lat"]), float(data[0]["lon"])
 
-        logger.warning("No geocoding results found")
         return None, None
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Geocoding API error: {e}")
-        return None, None
-    except (KeyError, ValueError, TypeError) as e:
-        logger.error(f"Error parsing geocoding response: {e}")
+    except Exception as e:
+        logger.error(f"Geocoding error: {e}")
         return None, None
 
 
 def buildings_nearby(
-    path_to_shp: str,
-    target_lat: float,
-    target_long: float,
-    min_height: float,
-    direction: str,
-    search_area: float = 200,
-) -> gpd.GeoDataFrame:
-    """
-    Find nearby buildings from a shapefile based on given criteria.
-    """
-    try:
-        # Read shapefile
-        df = gpd.read_file(path_to_shp)
-        threshold = search_area / 111111
+    path_to_shp, target_lat, target_long, min_height, direction, search_area=200
+):
+    # Read shapefile
+    df = gpd.read_file(path_to_shp)
+    threshold = search_area / 111111
+    # Calculate differences vectorially
+    df["lat_diff"] = df["LATITUDE"] - target_lat
+    df["long_diff"] = df["LONGITUDE"] - target_long
 
-        # Calculate differences vectorially
-        df["lat_diff"] = df["LATITUDE"].astype(float) - target_lat
-        df["long_diff"] = df["LONGITUDE"].astype(float) - target_long
+    # Calculate distance vectorially
+    df["avg_distance"] = np.sqrt(df["lat_diff"] ** 2 + df["long_diff"] ** 2)
 
-        # Calculate distance vectorially
-        df["distance"] = np.sqrt(df["lat_diff"] ** 2 + df["long_diff"] ** 2)
+    # Initial filtering using boolean masks
+    mask = (
+        (df["lat_diff"].abs() < threshold)
+        & (df["long_diff"].abs() < threshold)
+        & (df["AVG_HEIGHT"].astype(float) > min_height)
+    )
 
-        # Initial filtering using boolean masks
-        mask = (
-            (df["lat_diff"].abs() < threshold)
-            & (df["long_diff"].abs() < threshold)
-            & (df["AVG_HEIGHT"].astype(float) > min_height)
-        )
+    # Direction filtering
+    if direction == "N":
+        mask &= df["lat_diff"] > 0
+    elif direction == "S":
+        mask &= df["lat_diff"] < 0
+    elif direction == "E":
+        mask &= df["long_diff"] > 0
+    elif direction == "W":
+        mask &= df["long_diff"] < 0
+    elif direction == "NE":
+        mask &= (df["lat_diff"] > 0) & (df["long_diff"] > 0)
+    elif direction == "NW":
+        mask &= (df["lat_diff"] > 0) & (df["long_diff"] < 0)
+    elif direction == "SE":
+        mask &= (df["lat_diff"] < 0) & (df["long_diff"] > 0)
+    elif direction == "SW":
+        mask &= (df["lat_diff"] < 0) & (df["long_diff"] < 0)
 
-        # Direction filtering
-        direction_filters = {
-            "N": df["lat_diff"] > 0,
-            "S": df["lat_diff"] < 0,
-            "E": df["long_diff"] > 0,
-            "W": df["long_diff"] < 0,
-            "NE": (df["lat_diff"] > 0) & (df["long_diff"] > 0),
-            "NW": (df["lat_diff"] > 0) & (df["long_diff"] < 0),
-            "SE": (df["lat_diff"] < 0) & (df["long_diff"] > 0),
-            "SW": (df["lat_diff"] < 0) & (df["long_diff"] < 0),
-        }
+    # Apply all filters at once
+    filtered_df = df[mask].copy()
 
-        if direction in direction_filters:
-            mask &= direction_filters[direction]
-
-        # Apply filters and process results
-        filtered_df = df[mask].copy()
-        result_df = filtered_df[
-            ["LATITUDE", "LONGITUDE", "AVG_HEIGHT", "lat_diff", "long_diff", "distance"]
+    result_df = filtered_df[
+        [
+            "LATITUDE",
+            "LONGITUDE",
+            "AVG_HEIGHT",
+            "HEIGHT_MSL",
+            "lat_diff",
+            "long_diff",
+            "avg_distance",
         ]
-        result_df = result_df.rename(columns={"AVG_HEIGHT": "height"})
+    ].rename(columns={"AVG_HEIGHT": "height", "HEIGHT_MSL": "elevation_above_c"})
 
-        # Process differences and sort
-        result_df["lat_diff"] = result_df["lat_diff"].abs()
-        result_df["long_diff"] = result_df["long_diff"].abs()
+    # Create target coordinates tuple
+    target_coords = (float(target_lat), float(target_long))
 
-        return result_df.sort_values("distance")
+    # Calculate accurate geodesic distance in meters for the sorted DataFrame
+    result_df["distance_in_m"] = result_df.apply(
+        lambda row: float(
+            geopy.distance.geodesic(
+                target_coords, (float(row["LATITUDE"]), float(row["LONGITUDE"]))
+            ).km
+            * 1000
+        ),
+        axis=1,
+    )
 
-    except Exception as e:
-        logger.error(f"Error in buildings_nearby: {e}")
-        return gpd.GeoDataFrame()
+    # Sort by avg_distance
+    result_df = result_df.sort_values("distance_in_m")
+    # Remove the first (users building) row
+    result_df = result_df.iloc[1:].copy()
+    return result_df
 
 
-def calculate_sunlight_score(data: list) -> float:
-    """
-    Calculate the average sunlight score for the dataset.
-    """
+def calculate_base_score(
+    primary_direction: str, buildings_df: gpd.GeoDataFrame, floor_num: int
+) -> dict:
+    """Calculate base light score based on buildings and direction."""
     try:
-        # Extract valid sunlight data
-        sunlight_data = [
-            (day["sun_hours"], day["t_solar_rad"])
-            for day in data
-            if isinstance(day.get("sun_hours"), (int, float))
-            and isinstance(day.get("t_solar_rad"), (int, float))
-        ]
+        if buildings_df.empty:
+            return {
+                "score": 95,
+                "obstruction_details": "No significant obstructions found",
+            }
 
-        if not sunlight_data:
-            logger.error("No valid sunlight data found")
-            return -1
+        # Get closest building
+        closest = buildings_df.iloc[0]
+        distance = closest["distance"]
+        height = closest["height"]
 
-        # Calculate ranges for normalization
-        sun_hours_values, t_solar_rad_values = zip(*sunlight_data)
-        sun_hours_range = max(sun_hours_values) - min(sun_hours_values)
-        t_solar_rad_range = max(t_solar_rad_values) - min(t_solar_rad_values)
+        # Calculate relative height considering floor
+        relative_height = height - (floor_num * 3)  # Assuming 3m per floor
 
-        # Normalize and calculate scores
-        scores = []
-        for sun_hours, t_solar_rad in sunlight_data:
-            normalized_sun = (
-                ((sun_hours - min(sun_hours_values)) / sun_hours_range * 100)
-                if sun_hours_range
-                else 0
-            )
-            normalized_rad = (
-                ((t_solar_rad - min(t_solar_rad_values)) / t_solar_rad_range * 100)
-                if t_solar_rad_range
-                else 0
-            )
-            score = (0.6 * normalized_sun) + (0.4 * normalized_rad)
-            scores.append(score)
+        # Calculate obstruction angle
+        obstruction_angle = math.degrees(math.atan2(relative_height, distance))
 
-        return round(sum(scores) / len(scores), 1) if scores else -1
+        # Base score calculation considering direction
+        if primary_direction == "S":
+            if obstruction_angle < 15:
+                base_score = 95
+            elif obstruction_angle > 45:
+                base_score = 40
+            else:
+                base_score = 95 - ((obstruction_angle - 15) * 1.8)  # Linear reduction
+        else:
+            if obstruction_angle < 20:
+                base_score = 90
+            elif obstruction_angle > 60:
+                base_score = 50
+            else:
+                base_score = 90 - (
+                    (obstruction_angle - 20) * 1
+                )  # More lenient reduction
 
-    except Exception as e:
-        logger.error(f"Error calculating sunlight score: {e}")
-        return -1
-
-
-def get_sunlight_data(lat: float, lon: float, startDate: str, endDate: str) -> float:
-    """
-    Get sunlight data from Weatherbit API.
-    """
-    api_key = os.getenv("WEATHERBIT_API_KEY")  # Updated environment variable name
-    if not api_key:
-        logger.error("Weatherbit API key not found in environment variables")
-        return -1
-
-    try:
-        url = "https://api.weatherbit.io/v2.0/history/energy"
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "start_date": startDate,  # Fixed parameter name
-            "end_date": endDate,  # Fixed parameter name
-            "key": api_key,
+        return {
+            "score": round(base_score, 1),
+            "obstruction_angle": round(obstruction_angle, 1),
+            "nearest_building_distance": round(distance),
+            "nearest_building_height": round(height),
         }
-
-        logger.info(f"Requesting weather data with params: {params}")
-        response = requests.get(url, params=params, timeout=15)
-
-        # Add more detailed logging
-        if not response.ok:
-            logger.error(
-                f"Weatherbit API error: {response.status_code} - {response.text}"
-            )
-            return -1
-
-        data = response.json()
-        logger.info(f"Received data from Weatherbit: {data}")
-
-        if not data.get("data"):
-            logger.warning("No data received from Weatherbit")
-            return -1
-
-        return calculate_sunlight_score(data.get("data", []))
-
     except Exception as e:
-        logger.error(f"Error in get_sunlight_data: {str(e)}")
-        return -1
+        logger.error(f"Error in base score calculation: {e}")
+        return {"score": 70, "error": str(e)}
 
 
 @app.get("/light_score/")
 async def get_light_score(
     country: str,
     city: str,
-    postalCode: str,  # Changed from postalCode
-    streetName: str,  # Changed from streetName
-    streetNumber: str,  # Changed from streetNumber
+    postalCode: str,
+    streetName: str,
+    streetNumber: str,
     floor: Union[str, None] = None,
-    startDate: Union[str, None] = None,  # Changed from startDate
-    endDate: Union[str, None] = None,  # Changed from endDate
+    direction: Union[str, None] = None,
+    startDate: Union[str, None] = None,
+    endDate: Union[str, None] = None,
 ):
-    """Calculate light score for a given address and date range."""
+    """Calculate light score for an apartment."""
     try:
         # Validate required fields
         if not all([country, city, streetName, streetNumber]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        # Validate direction if provided
+        if direction and direction not in ["N", "S", "E", "W"]:
             raise HTTPException(
-                status_code=400,
-                detail="Missing required fields: country, city, streetName, and streetNumber are required",
+                status_code=400, detail="Direction must be one of: N, S, E, W"
             )
 
         # Set default dates if not provided
@@ -243,7 +218,7 @@ async def get_light_score(
             startDate = (today - timedelta(days=7)).strftime("%Y-%m-%d")
             endDate = today.strftime("%Y-%m-%d")
 
-        # Format address and get coordinates
+        # Get coordinates
         address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
         lat, lng = geocode_address(address)
 
@@ -253,41 +228,73 @@ async def get_light_score(
                 detail="Could not find coordinates for the provided address",
             )
 
-        # Get light score
-        light_score = get_sunlight_data(lat, lng, startDate, endDate)
-        if light_score == -1:
-            raise HTTPException(
-                status_code=500, detail="Could not retrieve or calculate sunlight data"
-            )
+        # Initialize final score components
+        floor_num = int(floor) if floor and floor.isdigit() else 1
 
-        # Apply floor adjustment
-        if floor and floor.isdigit():
-            floor_num = int(floor)
-            if floor_num > 1:
-                adjustment = min(floor_num * 2, 20)  # 2% per floor, max 20%
-                light_score = min(100, light_score + adjustment)
+        # Direction-based scoring
+        direction_weights = {
+            "S": 1.0,  # South gets full weight
+            "E": 0.85,  # East slightly reduced
+            "W": 0.85,  # West slightly reduced
+            "N": 0.7,  # North most reduced
+        }
+
+        # Get buildings data
+        try:
+            buildings = buildings_nearby(
+                "3D Massing (WGS84)/3DMassingShapefile_2023_WGS84.shp",
+                lat,
+                lng,
+                50,  # min height
+                direction or "S",  # Default to South if no direction specified
+            )
+        except Exception as e:
+            logger.error(f"Error getting nearby buildings: {e}")
+            buildings = gpd.GeoDataFrame()
+
+        # Calculate base score
+        score_details = calculate_base_score(direction or "S", buildings, floor_num)
+
+        base_score = score_details["score"]
+
+        # Apply direction weight
+        if direction:
+            base_score *= direction_weights.get(direction, 1.0)
+
+        # Floor bonus (2% per floor, max 20%)
+        floor_bonus = min(floor_num * 2, 20) if floor_num > 1 else 0
+
+        # Calculate final score
+        final_score = min(100, base_score + floor_bonus)
 
         return {
-            "country": country,
-            "city": city,
-            "postalCode": postalCode,
-            "streetName": streetName,
-            "streetNumber": streetNumber,
-            "floor": floor,
-            "light_score": light_score,
-            "lat": lat,
-            "lng": lng,
-            "startDate": startDate,
-            "endDate": endDate,
+            "light_score": round(final_score, 1),
+            "details": {
+                "base_score": round(base_score, 1),
+                "floor_bonus": floor_bonus,
+                "direction": direction or "auto",
+                "direction_factor": direction_weights.get(direction, 1.0),
+                "obstruction_details": score_details,
+                "floor_level": floor_num,
+                "coordinates": {"lat": lat, "lng": lng},
+            },
+            "metadata": {
+                "country": country,
+                "city": city,
+                "postalCode": postalCode,
+                "streetName": streetName,
+                "streetNumber": streetNumber,
+                "startDate": startDate,
+                "endDate": endDate,
+            },
         }
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Unexpected error in light score calculation: {e}")
+        logger.error(f"Unexpected error: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"An unexpected error occurred while calculating the light score: {str(e)}",
+            status_code=500, detail=f"An unexpected error occurred: {str(e)}"
         )
 
 
