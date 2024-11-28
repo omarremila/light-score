@@ -19,5 +19,5 @@ shapely>=2.0.0
 fiona>=1.8.0
 pyproj>=2.2.0
 geopandas
-geopy.distance
+geopy
 sunposition
