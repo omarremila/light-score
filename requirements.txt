@@ -22,4 +22,3 @@ geopandas
 geopy
 sunposition
 shapely
-io

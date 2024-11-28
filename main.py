@@ -13,6 +13,7 @@ import math
 import geopy.distance
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import Point
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
