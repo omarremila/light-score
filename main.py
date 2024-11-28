@@ -14,6 +14,8 @@ import geopy.distance
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
+import io
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -41,7 +43,7 @@ def read_root():
 
 def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
     """Geocode an address using LocationIQ API."""
-    api_key = "pk.68d59be44a490cd6237c99dbe3ff62e2"  # os.getenv("LOCATIONIQ_API_KEY")
+    api_key = os.getenv("LOCATIONIQ_API_KEY")
     if not api_key:
         logger.error("LocationIQ API key not found")
         return None, None
