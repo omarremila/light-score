@@ -21,3 +21,5 @@ pyproj>=2.2.0
 geopandas
 geopy
 sunposition
+shapely
+io
