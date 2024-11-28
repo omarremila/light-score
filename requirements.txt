@@ -10,4 +10,4 @@ pyproj>=2.2.0
 python-dotenv==1.0.1
 requests==2.31.0
 shapely>=2.0.0
-uvicorn==0.27.1
+uvicorn==0.27.1geopy>=2.4.0
