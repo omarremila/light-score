@@ -69,18 +69,17 @@ def geocode_address(address: str) -> tuple[Optional[float], Optional[float]]:
 def get_toronto_building_data(
     target_lat: float, target_long: float, direction: str
 ) -> pd.DataFrame:
-    """Fetches building data from Toronto's Open Data portal."""
     base_url = "https://ckan0.cf.opendata.inter.prod-toronto.ca"
-    package_url = f"{base_url}/api/3/action/package_show"
+    url = base_url + "/api/3/action/package_show"
+    params = {"id": "3d-massing"}
 
     try:
-        # Get package metadata
-        response = requests.get(package_url, params={"id": "3d-massing"})
+        response = requests.get(url, params=params)
         response.raise_for_status()
         package = response.json()
 
-        # Find the WGS84 shapefile resource
-        shapefile_resource = next(
+        # Find WGS84 resource
+        resource = next(
             (
                 r
                 for r in package["result"]["resources"]
@@ -89,19 +88,20 @@ def get_toronto_building_data(
             None,
         )
 
-        if not shapefile_resource:
-            raise Exception("3D Massing shapefile not found")
+        if not resource:
+            raise Exception("WGS84 resource not found")
 
-        # Download and process shapefile
-        shp_response = requests.get(shapefile_resource["url"])
-        shp_response.raise_for_status()
+        # Get resource metadata and download URL
+        resource_url = base_url + "/api/3/action/resource_show?id=" + resource["id"]
+        resource_metadata = requests.get(resource_url).json()
+        download_url = resource_metadata["result"]["url"]
 
-        # Convert to GeoDataFrame
-        gdf = gpd.read_file(shp_response.content)
+        # Download and process
+        gdf = gpd.read_file(download_url)
 
-        # Filter buildings based on direction and distance
+        # Rest of your existing filtering logic
         point = Point(target_long, target_lat)
-        buffer_distance = 0.003  # Approximately 300m
+        buffer_distance = 0.003
 
         direction_filters = {
             "N": gdf["geometry"].y > target_lat,
@@ -114,15 +114,12 @@ def get_toronto_building_data(
             direction_filters[direction]
             & gdf.geometry.within(point.buffer(buffer_distance))
         ]
-
-        # Calculate distances
         filtered_gdf["distance_in_m"] = filtered_gdf.geometry.distance(point) * 111000
 
         return filtered_gdf.sort_values("distance_in_m")
 
     except Exception as e:
         logger.error(f"Error fetching Toronto building data: {e}")
-        # Return simplified fallback data only if real data fails
         return pd.DataFrame(
             [
                 {
