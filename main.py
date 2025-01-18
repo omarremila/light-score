@@ -19,6 +19,21 @@ if not debugpy.is_client_connected():
     debugpy.listen(("localhost", 5678))
     print("⚡ Debugger is listening on port 5678")
 app = FastAPI()
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import geopandas as gpd
+from shapely.geometry import Point
+
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configure CORS
 app.add_middleware(
@@ -34,7 +49,7 @@ app.add_middleware(
 
 
 def geocode_address(address: str):
-    api_key = "pk.68d59be44a490cd6237c99dbe3ff62e2"  # os.getenv("LOCATIONIQ_API_KEY")
+    api_key = os.getenv("LOCATIONIQ_API_KEY") 
     base_url = "https://us1.locationiq.com/v1/search.php"
     params = {"key": api_key, "q": address, "format": "json", "limit": 1}
 
@@ -50,102 +65,135 @@ def geocode_address(address: str):
         return None, None
 
 
-import fiona
-from shapely.geometry import Point, shape
-import os
 
 
-def get_building_data(lat: float, lng: float, direction: str):
+def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
+    """
+    Find buildings within specified radius of a given location.
+
+    Args:
+        lat (float): Latitude of the search point
+        lng (float): Longitude of the search point
+        radius_meters (float): Search radius in meters (default 500m)
+    """
+    DEBUG = False
     try:
-        print("Loading shapefile data...")
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        shapefile_path = os.path.join(
-            base_dir, "data", "3DMassingShapefile_2023_WGS84.shp"
+        if DEBUG:
+            print(f"Searching for buildings near {lat}, {lng}...")
+ 
+        # Load the shapefile
+        buildings = gpd.read_file("data/3DMassingShapefile_2023_WGS84.shp")
+
+        # Filter buildings roughly within the area first using lat/long columns
+        # Convert radius to approximate degrees (1 degree ~ 111km at equator)
+        degree_radius = radius_meters / 111000
+
+        mask = (
+            (buildings["LATITUDE"] >= lat - degree_radius)
+            & (buildings["LATITUDE"] <= lat + degree_radius)
+            & (buildings["LONGITUDE"] >= lng - degree_radius)
+            & (buildings["LONGITUDE"] <= lng + degree_radius)
         )
-        print(f"Attempting to load shapefile from: {shapefile_path}")
 
-        if not os.path.exists(shapefile_path):
-            print(f"Error: Shapefile not found at {shapefile_path}")
-            return None
+        nearby = buildings[mask].copy()
 
-        with fiona.open(shapefile_path, "r") as source:
-            print(f"Successfully opened shapefile. Schema: {source.schema}")
-            print(f"Number of records: {len(source)}")
+        if len(nearby) == 0:
+            print("No buildings found in initial search area")
+            return []
 
-            point = Point(lng, lat)
-            print(f"Searching around point: {point}")
+        # Calculate exact distances for the filtered buildings
+        search_point = Point(lng, lat)
+        nearby["distance"] = nearby.apply(
+            lambda row: Point(row["LONGITUDE"], row["LATITUDE"]).distance(search_point)
+            * 111000,
+            axis=1,
+        )
 
-            # Convert 500m to degrees (approximately 0.0045 degrees)
-            buffer_distance = 0.0045
-            search_area = point.buffer(buffer_distance)
-            bounds = search_area.bounds
-            print(f"Search bounds: {bounds}")
+        # Filter by exact distance and sort
+        result = nearby[nearby["distance"] <= radius_meters].sort_values("distance")
 
-            # List to store nearby buildings
-            buildings_list = []
-            count = 0
+        # Convert to list of dictionaries for output
+        buildings_list = []
+        for _, building in result.iterrows():
+            buildings_list.append(
+                {
+                    "distance": round(building["distance"], 1),
+                    "height_max": round(float(building["MAX_HEIGHT"]), 1),
+                    "height": round(float(building["HEIGHT_MSL"]), 1),
+                    "area": round(float(building["SHAPE_AREA"]), 1),
+                    "lat": building["LATITUDE"],
+                    "lng": building["LONGITUDE"],
+                }
+            )
 
-            # Filter and process buildings
-            for feature in source:
-                count += 1
-                if count % 1000 == 0:  # Print progress every 1000 features
-                    print(f"Processed {count} features...")
+        if DEBUG:
+            print(f"Found {len(buildings_list)} buildings within {radius_meters}m")
+            # Print first few results
+            for building in buildings_list:
+                print(
+                    f"Building at {building['distance']}m: "
+                    f"Height={building['height']}m, "
+                    f"Area={building['area']}m²"
+                    f"lat= {building["lat"]}"
+                    f"lng=  {building["lng"]}"
+                )
 
-                # Create Shapely geometry from feature
-                try:
-                    building_geom = shape(feature["geometry"])
-                    centroid = building_geom.centroid
-
-                    # Calculate distance in meters
-                    distance = (
-                        building_geom.distance(point) * 111000
-                    )  # Convert to meters
-
-                    if distance <= 500:  # Within 500m
-                        height = float(feature["properties"].get("MAX_HEIGHT", 0))
-                        print(f"Found building: Distance={distance}m, Height={height}m")
-                        buildings_list.append(
-                            {
-                                "height": height,
-                                "distance": distance,
-                                "direction": get_direction(
-                                    lat, lng, centroid.y, centroid.x
-                                ),
-                            }
-                        )
-                except Exception as e:
-                    print(f"Error processing feature: {e}")
-                    continue
-
-            print(f"Total buildings found within 500m: {len(buildings_list)}")
-            if not buildings_list:
-                print(f"No buildings found within 500m of {lat}, {lng}")
-                return None
-
-            # Sort by distance
-            buildings_list.sort(key=lambda x: x["distance"])
-            print(f"Closest building: {buildings_list[0]}")
-
-            return buildings_list
+        return buildings_list
 
     except Exception as e:
-        print(f"Error in loading shapefile: {str(e)}")
-        print(f"Error type: {type(e).__name__}")
+        print(f"Error: {str(e)}")
         import traceback
 
         traceback.print_exc()
         return None
 
 
-def get_direction(lat1: float, lng1: float, lat2: float, lng2: float) -> str:
-    """Calculate the cardinal direction (N,S,E,W) from point 1 to point 2"""
-    dlat = lat2 - lat1
-    dlng = lng2 - lng1
+def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
+    """
+    Filter buildings list based on direction relative to origin point.
 
-    if abs(dlat) > abs(dlng):
-        return "N" if dlat > 0 else "S"
-    else:
-        return "E" if dlng > 0 else "W"
+    Args:
+        buildings_list: List of buildings with 'lat' and 'lng' keys
+        origin_lat: Latitude of reference point
+        origin_lng: Longitude of reference point
+        direction: "N", "NE", "E", "SE", "S", "SW", "W", or "NW"
+
+    Returns:
+        List of buildings in specified direction
+    """
+    filtered_buildings = []
+    
+    for building in buildings_list:
+        lat_diff = building['lat'] - origin_lat
+        lng_diff = building['lng'] - origin_lng
+        
+        is_in_direction = False
+        
+        # Simple direction checks
+        if direction == "N" and lat_diff > 0:
+            is_in_direction = True
+        elif direction == "S" and lat_diff < 0:
+            is_in_direction = True
+        elif direction == "E" and lng_diff > 0:
+            is_in_direction = True
+        elif direction == "W" and lng_diff < 0:
+            is_in_direction = True
+        # Diagonal checks
+        elif direction == "NE" and lat_diff > 0 and lng_diff > 0:
+            is_in_direction = True
+        elif direction == "SE" and lat_diff < 0 and lng_diff > 0:
+            is_in_direction = True
+        elif direction == "SW" and lat_diff < 0 and lng_diff < 0:
+            is_in_direction = True
+        elif direction == "NW" and lat_diff > 0 and lng_diff < 0:
+            is_in_direction = True
+            
+        if is_in_direction:
+            filtered_buildings.append(building)
+    
+    return filtered_buildings
+
+
 
 
 def calculate_light_score(building_data: dict, floor: int, direction: str):
@@ -195,7 +243,7 @@ async def get_light_score(
     floor: int = 1,
     direction: str = "S",
 ):
-    if direction not in ["N", "S", "E", "W"]:
+    if direction not in ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]:
         raise HTTPException(status_code=400, detail="Invalid direction")
 
     address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
@@ -204,8 +252,9 @@ async def get_light_score(
     if not lat or not lng:
         raise HTTPException(status_code=404, detail="Address not found")
 
-    building_data = get_building_data(lat, lng, direction)
-    score_data = calculate_light_score(building_data, floor, direction)
+    building_data = find_nearby_buildings(lat, lng, direction)
+    filtered_buildings = filter_by_direction(building_data, lat, lng, direction)
+    score_data = calculate_light_score(filtered_buildings, floor, direction)
 
     return {
         "coordinates": {"lat": lat, "lng": lng},
@@ -214,59 +263,9 @@ async def get_light_score(
         "building_data": building_data,
     }
 
-
-""" 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
-"""
 
 
-def test_location():
-    # Test address: 19 Grand Trunk Crescent
-    test_data = {
-        "country": "Canada",
-        "city": "Toronto",
-        "postalCode": "M5J 3A3",
-        "streetName": "Grand Trunk Crescent",
-        "streetNumber": "19",
-        "floor": 5,
-        "direction": "S",
-    }
-
-    # Create a test client
-    from fastapi.testclient import TestClient
-
-    client = TestClient(app)
-
-    # Make the request
-    response = client.get("/light_score/", params=test_data)
-
-    print(
-        f"\nTesting: 19 Grand Trunk Crescent, Floor {test_data['floor']}, Direction {test_data['direction']}"
-    )
-    print(f"Status Code: {response.status_code}")
-    if response.status_code == 200:
-        data = response.json()
-        print("\nResults:")
-        print(f"Light Score: {data.get('light_score')}")
-        print(f"Coordinates: {data.get('coordinates')}")
-        print("\nDetails:")
-        for key, value in data.get("details", {}).items():
-            print(f"{key}: {value}")
-        print("\nBuilding Data:")
-        print(data.get("building_data"))
-    else:
-        print("Error:", response.text)
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    # Add this line to run tests
-    test_location()
-
-    # Comment this out during testing if you don't want to start the server
-    # uvicorn.run(app, host="0.0.0.0", port=8000)
