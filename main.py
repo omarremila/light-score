@@ -420,6 +420,9 @@ def calculate_final_score(base_score: float, floor: int, direction: str,
     # 4. Calculate final score
     final_score = min(100, (adjusted_base_score * direction_factors[direction]) + floor_bonus)
     return round(final_score, 1)
+@app.get("/")
+async def root():
+    return {"status": "ok"}
 @app.get("/light_score/")
 async def get_light_score(
     country: str,
