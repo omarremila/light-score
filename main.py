@@ -14,32 +14,65 @@ from astropy.time import Time
 import astropy.units as u
 import math
 
-# System and utilities
+# System and utilities (only once)
 import os
 import debugpy
 import logging
 
-if not debugpy.is_client_connected():
-    debugpy.listen(("localhost", 5678))
-    print("⚡ Debugger is listening on port 5678")
-app = FastAPI()
+# Logging setup
+class IndexFilter(logging.Filter):
+    def filter(self, record):
+        return 'Next index' not in record.getMessage()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Set up root logger with filter
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+root_logger = logging.getLogger()
+root_logger.addFilter(IndexFilter())
+
+# Initialize logger for this module
 logger = logging.getLogger(__name__)
-app = FastAPI()
 
+# Set Fiona's logger level
+logging.getLogger('fiona.collection').setLevel(logging.WARNING)
+logging.getLogger('fiona').addFilter(IndexFilter())
+
+# Then FastAPI app initialization
+app = FastAPI()
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["https://sun-light-strength.up.railway.app/", "https://light-score-production.up.railway.app/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+import math
 
+def calculate_azimuth(lat1, lon1, lat2, lon2):
+    # Convert decimal degrees to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    dlon = lon2_rad - lon1_rad
+
+    y = math.sin(dlon) * math.cos(lat2_rad)
+    x = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+        math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon)
+
+    bearing_rad = math.atan2(y, x)
+    bearing_deg = math.degrees(bearing_rad)
+
+    # Normalize to [0, 360) degrees
+    bearing_deg = (bearing_deg + 360) % 360
+
+    return bearing_deg
 
 def geocode_address(address: str):
     api_key = os.getenv("LOCATIONIQ_API_KEY") 
@@ -59,7 +92,6 @@ def geocode_address(address: str):
 
 
 
-
 def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
     """
     Find buildings within specified radius of a given location.
@@ -73,7 +105,7 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
     try:
         if DEBUG:
             print(f"Searching for buildings near {lat}, {lng}...")
- 
+
         # Load the shapefile
         buildings = gpd.read_file("data/3DMassingShapefile_2023_WGS84.shp")
 
@@ -107,18 +139,23 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 
         # Convert to list of dictionaries for output
         buildings_list = []
+
         for _, building in result.iterrows():
+            height_values = [
+                building.get("MIN_HEIGHT", 0),
+                building.get("MAX_HEIGHT", 0), 
+                building.get("AVG_HEIGHT", 0),
+                building.get("HEIGHT_MSL", 0)
+            ]
             buildings_list.append(
                 {
                     "distance": round(building["distance"], 1),
-                    "height_max": round(float(building["MAX_HEIGHT"]), 1),
-                    "height": round(float(building["HEIGHT_MSL"]), 1),
+                    "height": round(float(max(height_values)), 1),
                     "area": round(float(building["SHAPE_AREA"]), 1),
                     "lat": building["LATITUDE"],
                     "lng": building["LONGITUDE"],
                 }
             )
-
         if DEBUG:
             print(f"Found {len(buildings_list)} buildings within {radius_meters}m")
             # Print first few results
@@ -203,23 +240,6 @@ def get_sun_position(latitude: float, longitude: float, time: Time = None):
 
     return {"elevation": float(sun_altaz.alt.deg), "azimuth": float(sun_altaz.az.deg)}
 
-import logging
-
-# Configure detailed logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-import logging
-
-# Configure detailed logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 def calculate_obstruction_factor(buildings: list, floor: int) -> float:
     """
@@ -243,17 +263,17 @@ def calculate_obstruction_factor(buildings: list, floor: int) -> float:
     total_obstruction = 0
     max_obstruction = 360  # degrees in a circle
     
-    logger.debug(f"\n=== Starting Obstruction Factor Calculation ===")
-    logger.debug(f"Observer floor: {floor}, height: {observer_height}m")
-    logger.debug(f"Number of buildings to analyze: {len(buildings)}")
+    logger.info(f"\n=== Starting Obstruction Factor Calculation ===")
+    logger.info(f"Observer floor: {floor}, height: {observer_height}m")
+    logger.info(f"Number of buildings to analyze: {len(buildings)}")
     
     for idx, building in enumerate(buildings, 1):
-        logger.debug(f"\nAnalyzing building #{idx}:")
-        logger.debug(f"Building height: {building['height']}m, distance: {building['distance']}m")
+        logger.info(f"\nAnalyzing building #{idx}:")
+        logger.info(f"Building height: {building['height']}m, distance: {building['distance']}m")
         
         # 1. Calculate height difference
         building_height_diff = building['height'] - observer_height
-        logger.debug(f"Height difference: {building_height_diff}m")
+        logger.info(f"Height difference: {building_height_diff}m")
         
         if building_height_diff > 0:
             distance = building['distance']
@@ -271,17 +291,17 @@ def calculate_obstruction_factor(buildings: list, floor: int) -> float:
     
     # 5. Normalize to 0-1 range
     obstruction_factor = max(0, min(1, 1 - (total_obstruction / max_obstruction)))
-    logger.debug(f"\nFinal Calculations:")
-    logger.debug(f"Total obstruction: {total_obstruction:.2f}°")
-    logger.debug(f"Normalized obstruction factor: {obstruction_factor:.2f}")
-    logger.debug("=== Obstruction Factor Calculation Complete ===\n")
+    logger.info(f"\nFinal Calculations:")
+    logger.info(f"Total obstruction: {total_obstruction:.2f}°")
+    logger.info(f"Normalized obstruction factor: {obstruction_factor:.2f}")
+    logger.info("=== Obstruction Factor Calculation Complete ===\n")
     return round(obstruction_factor, 2)
 
 def calculate_sun_blockage(sun_angle: float, sun_azimuth: float, buildings: list, 
-                         observer_lat: float, observer_lng: float, floor: int):
-    logger.debug(f"\n=== Starting Sun Blockage Calculation ===")
-    logger.debug(f"Sun angle: {sun_angle}°, Sun azimuth: {sun_azimuth}°")
-    logger.debug(f"Observer position: {observer_lat:.4f}°N, {observer_lng:.4f}°E, Floor: {floor}")
+                        observer_lat: float, observer_lng: float, floor: int):
+    logger.info(f"\n=== Starting Sun Blockage Calculation ===")
+    logger.info(f"Sun angle: {sun_angle}°, Sun azimuth: {sun_azimuth}°")
+    logger.info(f"Observer position: {observer_lat:.4f}°N, {observer_lng:.4f}°E, Floor: {floor}")
     """
     Calculate sun blockage based on building positions and sun angle.
     
@@ -321,13 +341,13 @@ def calculate_sun_blockage(sun_angle: float, sun_azimuth: float, buildings: list
                 
                 # 2. Calculate building's angular height
                 building_angle = math.degrees(math.atan2(building_height_diff, distance))
-                
                 # 3. Calculate building's azimuth relative to observer
-                dlng = building['lng'] - observer_lng
-                dlat = building['lat'] - observer_lat
-                building_azimuth = math.degrees(math.atan2(dlng, dlat)) % 360
-                
-                # 4. Calculate azimuth difference
+                building_azimuth = calculate_azimuth(building['lng'], building['lat'], observer_lat, observer_lng)
+                logger.info(f"LAT: {building['lat']} LONG: {str(building['lng'])}°")
+                logger.info(f"LAT: {observer_lat} LONG: {str(observer_lng)}°")
+                logger.info(f"Building angle: {building_angle}°, Building azimuth: {str(building_azimuth)}°")
+                logger.info(f"Building angle : {calculate_azimuth(building['lng'], building['lat'], observer_lat, observer_lng)}")
+                # 4. Calculate azimuth difference``
                 azimuth_diff = abs(building_azimuth - sun_azimuth)
                 if azimuth_diff > 180:
                     azimuth_diff = 360 - azimuth_diff
@@ -342,7 +362,7 @@ def calculate_sun_blockage(sun_angle: float, sun_azimuth: float, buildings: list
                         impact = (building_angle - sun_angle) * (15 - azimuth_diff) / 15
                         blockage["blockage_percentage"] = min(100, 
                             blockage["blockage_percentage"] + impact)
-                            
+                    
                         blockage["blocking_buildings"].append({
                             "distance": building["distance"],
                             "height": building["height"],
@@ -358,11 +378,11 @@ def calculate_sun_blockage(sun_angle: float, sun_azimuth: float, buildings: list
 
 def calculate_final_score(base_score: float, floor: int, direction: str, 
                         sun_blockage: dict, obstruction_factor: float) -> float:
-    logger.debug(f"\n=== Starting Final Score Calculation ===")
-    logger.debug(f"Initial base score: {base_score}")
-    logger.debug(f"Floor: {floor}, Direction: {direction}")
-    logger.debug(f"Sun blockage: {sun_blockage['blockage_percentage']}%")
-    logger.debug(f"Obstruction factor: {obstruction_factor}")
+    logger.info(f"\n=== Starting Final Score Calculation ===")
+    logger.info(f"Initial base score: {base_score}")
+    logger.info(f"Floor: {floor}, Direction: {direction}")
+    logger.info(f"Sun blockage: {sun_blockage['blockage_percentage']}%")
+    logger.info(f"Obstruction factor: {obstruction_factor}")
     """
     Calculate final light score incorporating all factors.
     
