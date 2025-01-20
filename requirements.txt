@@ -22,3 +22,4 @@ geopy
 sunposition
 shapely
 debugpy
+astropy
