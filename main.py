@@ -53,6 +53,12 @@ app.add_middleware(
 
 import math
 
+def validate_environment():
+    required_vars = ["LOCATIONIQ_API_KEY"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        
 def calculate_azimuth(lat1, lon1, lat2, lon2):
     # Convert decimal degrees to radians
     lat1_rad = math.radians(lat1)
@@ -75,7 +81,9 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
     return bearing_deg
 
 def geocode_address(address: str):
+
     api_key = os.getenv("LOCATIONIQ_API_KEY") 
+
     base_url = "https://us1.locationiq.com/v1/search.php"
     params = {"key": api_key, "q": address, "format": "json", "limit": 1}
 
@@ -171,11 +179,8 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
         return buildings_list
 
     except Exception as e:
-        print(f"Error: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
-        return None
+        logger.error(f"Error finding nearby buildings: {str(e)}")
+        return []
 
 
 def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
@@ -497,6 +502,7 @@ async def get_light_score(
         "building_data": buildings
     }
 if __name__ == "__main__":
+    validate_environment()
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
