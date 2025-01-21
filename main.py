@@ -41,6 +41,9 @@ logging.getLogger('fiona').addFilter(IndexFilter())
 
 # Then FastAPI app initialization
 app = FastAPI()
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
@@ -58,7 +61,7 @@ def validate_environment():
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
-        
+
 def calculate_azimuth(lat1, lon1, lat2, lon2):
     # Convert decimal degrees to radians
     lat1_rad = math.radians(lat1)
