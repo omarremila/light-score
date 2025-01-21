@@ -19,6 +19,8 @@ import os
 import debugpy
 import logging
 
+
+
 # Logging setup
 class IndexFilter(logging.Filter):
     def filter(self, record):
@@ -41,20 +43,98 @@ logging.getLogger('fiona').addFilter(IndexFilter())
 
 # Then FastAPI app initialization
 app = FastAPI()
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://sun-light-strength.up.railway.app/", "https://light-score-production.up.railway.app/"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 
-import math
+@app.get("/light_score/")
+async def get_light_score(
+    country: str,
+    city: str,
+    postalCode: str,
+    streetName: str,
+    streetNumber: str,
+    floor: int = 1,
+    direction: str = "S",
+):
+    logger.info(f"\n\n=== New Light Score Request ===")
+    logger.info(f"Address: {streetNumber} {streetName}, {city}, {postalCode}, {country}")
+    logger.info(f"Floor: {floor}, Direction: {direction}")
+    
+    if direction not in ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]:
+        logger.error(f"Invalid direction: {direction}")
+        raise HTTPException(status_code=400, detail="Invalid direction")
+
+    # Geocode address
+    address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
+    lat, lng = geocode_address(address)
+    logger.info(f"Geocoded coordinates: {lat}, {lng}")
+
+    if not lat or not lng:
+        logger.error(f"Address not found: {address}")
+        raise HTTPException(status_code=404, detail="Address not found")
+
+    # Get nearby buildings
+    buildings = find_nearby_buildings(lat, lng)
+    buildings= filter_by_direction(buildings, lat, lng, direction)
+    logger.info(f"Found {len(buildings)} nearby buildings")
+    
+    # Get sun position
+    sun_position = get_sun_position(lat, lng)
+    logger.info(f"Sun position - Elevation: {sun_position['elevation']}°, Azimuth: {sun_position['azimuth']}°")
+    
+    # Calculate sun blockage
+    sun_blockage = calculate_sun_blockage(
+        sun_position["elevation"],
+        sun_position["azimuth"],
+        buildings,
+        lat,
+        lng,
+        floor
+    )
+    
+    # Calculate obstruction factor
+    obstruction_factor = calculate_obstruction_factor(buildings, floor)
+    
+    # Calculate final score
+    base_score = 85 - (sun_blockage["blockage_percentage"] * 0.5)
+    final_score = calculate_final_score(base_score, floor, direction, sun_blockage, obstruction_factor)
+    
+    logger.info(f"\nFinal Results:")
+    logger.info(f"Base Score: {base_score:.1f}")
+    logger.info(f"Sun Blockage: {sun_blockage['blockage_percentage']:.1f}%")
+    logger.info(f"Obstruction Factor: {obstruction_factor:.2f}")
+    logger.info(f"Final Light Score: {final_score}\n")
+    logger.info("=== Request Complete ===\n")
+
+    return {
+        "coordinates": {"lat": lat, "lng": lng},
+        "light_score": round(final_score, 1),
+        "details": {
+            "base_score": round(base_score, 1),
+            "floor_bonus": min(floor * 2, 20) if floor > 1 else 0,
+            "direction": direction,
+            "sun_blockage": sun_blockage,
+            "obstruction_factor": obstruction_factor
+        },
+        "sun_position": sun_position,
+        "building_data": buildings
+    }
+
+
 
 def validate_environment():
     required_vars = ["LOCATIONIQ_API_KEY"]
@@ -100,8 +180,6 @@ def geocode_address(address: str):
         return None, None
     except Exception as e:
         return None, None
-
-
 
 def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
     """
@@ -231,8 +309,6 @@ def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
     
     return filtered_buildings
 
-
-
 def get_sun_position(latitude: float, longitude: float, time: Time = None):
     """
     Get both sun angle and azimuth.
@@ -247,7 +323,6 @@ def get_sun_position(latitude: float, longitude: float, time: Time = None):
     sun_altaz = sun.transform_to(altaz)
 
     return {"elevation": float(sun_altaz.alt.deg), "azimuth": float(sun_altaz.az.deg)}
-
 
 def calculate_obstruction_factor(buildings: list, floor: int) -> float:
     """
@@ -428,82 +503,7 @@ def calculate_final_score(base_score: float, floor: int, direction: str,
     # 4. Calculate final score
     final_score = min(100, (adjusted_base_score * direction_factors[direction]) + floor_bonus)
     return round(final_score, 1)
-@app.get("/")
-async def root():
-    return {"status": "ok"}
-@app.get("/light_score/")
-async def get_light_score(
-    country: str,
-    city: str,
-    postalCode: str,
-    streetName: str,
-    streetNumber: str,
-    floor: int = 1,
-    direction: str = "S",
-):
-    logger.info(f"\n\n=== New Light Score Request ===")
-    logger.info(f"Address: {streetNumber} {streetName}, {city}, {postalCode}, {country}")
-    logger.info(f"Floor: {floor}, Direction: {direction}")
-    
-    if direction not in ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]:
-        logger.error(f"Invalid direction: {direction}")
-        raise HTTPException(status_code=400, detail="Invalid direction")
 
-    # Geocode address
-    address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
-    lat, lng = geocode_address(address)
-    logger.info(f"Geocoded coordinates: {lat}, {lng}")
-
-    if not lat or not lng:
-        logger.error(f"Address not found: {address}")
-        raise HTTPException(status_code=404, detail="Address not found")
-
-    # Get nearby buildings
-    buildings = find_nearby_buildings(lat, lng)
-    buildings= filter_by_direction(buildings, lat, lng, direction)
-    logger.info(f"Found {len(buildings)} nearby buildings")
-    
-    # Get sun position
-    sun_position = get_sun_position(lat, lng)
-    logger.info(f"Sun position - Elevation: {sun_position['elevation']}°, Azimuth: {sun_position['azimuth']}°")
-    
-    # Calculate sun blockage
-    sun_blockage = calculate_sun_blockage(
-        sun_position["elevation"],
-        sun_position["azimuth"],
-        buildings,
-        lat,
-        lng,
-        floor
-    )
-    
-    # Calculate obstruction factor
-    obstruction_factor = calculate_obstruction_factor(buildings, floor)
-    
-    # Calculate final score
-    base_score = 85 - (sun_blockage["blockage_percentage"] * 0.5)
-    final_score = calculate_final_score(base_score, floor, direction, sun_blockage, obstruction_factor)
-    
-    logger.info(f"\nFinal Results:")
-    logger.info(f"Base Score: {base_score:.1f}")
-    logger.info(f"Sun Blockage: {sun_blockage['blockage_percentage']:.1f}%")
-    logger.info(f"Obstruction Factor: {obstruction_factor:.2f}")
-    logger.info(f"Final Light Score: {final_score}\n")
-    logger.info("=== Request Complete ===\n")
-
-    return {
-        "coordinates": {"lat": lat, "lng": lng},
-        "light_score": round(final_score, 1),
-        "details": {
-            "base_score": round(base_score, 1),
-            "floor_bonus": min(floor * 2, 20) if floor > 1 else 0,
-            "direction": direction,
-            "sun_blockage": sun_blockage,
-            "obstruction_factor": obstruction_factor
-        },
-        "sun_position": sun_position,
-        "building_data": buildings
-    }
 if __name__ == "__main__":
     validate_environment()
     import uvicorn
