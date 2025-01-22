@@ -253,7 +253,7 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
                     f"Building at {building['distance']}m: "
                     f"Height={building['height']}m, "
                     f"Area={building['area']}m²"
-                    f"lat= {building["lat"]}"
+                    f"lat= {building['lat']}"
                     f"lng=  {building["lng"]}"
                 )
 
