@@ -54,7 +54,23 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"status": "ok"}
+    logger.info("Root endpoint called")
+    try:
+        # Test shapefile access
+        shapefile_path = "data/3DMassingShapefile_2023_WGS84.shp"
+        if not os.path.exists(shapefile_path):
+            logger.error("Shapefile missing")
+            return {"status": "error", "detail": "Shapefile missing"}
+            
+        # Test environment variables
+        if not os.getenv("LOCATIONIQ_API_KEY"):
+            logger.error("API key missing")
+            return {"status": "error", "detail": "API key missing"}
+            
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error in root endpoint: {str(e)}")
+        return {"status": "error", "detail": str(e)}
 
 
 @app.get("/health")
@@ -205,6 +221,13 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 
         # Load the shapefile
         buildings = gpd.read_file("data/3DMassingShapefile_2023_WGS84.shp")
+        logger.info(f"Attempting to load shapefile from: {"data/3DMassingShapefile_2023_WGS84.shp"}")
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"Directory contents: {os.listdir()}")
+
+        if not os.path.exists("data/3DMassingShapefile_2023_WGS84.shp"):
+            logger.error(f"Shapefile not found at {"data/3DMassingShapefile_2023_WGS84.shp"}")
+        return []
 
         # Filter buildings roughly within the area first using lat/long columns
         # Convert radius to approximate degrees (1 degree ~ 111km at equator)
@@ -535,7 +558,6 @@ def calculate_final_score(
 
 
 if __name__ == "__main__":
-    validate_environment()
+    
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
