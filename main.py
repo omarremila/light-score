@@ -19,6 +19,10 @@ import os
 import debugpy
 import logging
 
+from dotenv import load_dotenv
+load_dotenv()  # This should be at the top of your file, before any environment variables are accessed
+
+
 
 # Logging setup
 class IndexFilter(logging.Filter):
@@ -55,6 +59,9 @@ app.add_middleware(
 @app.get("/")
 async def root():
     logger.info("Root endpoint called")
+        # Test environment variables
+    api_key = os.getenv("LOCATIONIQ_API_KEY")
+    logger.info(f"api key {api_key}")
     try:
         # Test shapefile access
         shapefile_path = "data/3DMassingShapefile_2023_WGS84.shp"
@@ -62,7 +69,7 @@ async def root():
             logger.error("Shapefile missing")
             return {"status": "error", "detail": "Shapefile missing"}
             
-        # Test environment variables
+
         if not os.getenv("LOCATIONIQ_API_KEY"):
             logger.error("API key missing")
             return {"status": "error", "detail": "API key missing"}
@@ -189,6 +196,8 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
 def geocode_address(address: str):
 
     api_key = os.getenv("LOCATIONIQ_API_KEY")
+    logger.info(f"api key {api_key}")
+    print(f"api key {api_key}", flush=True)
 
     base_url = "https://us1.locationiq.com/v1/search.php"
     params = {"key": api_key, "q": address, "format": "json", "limit": 1}

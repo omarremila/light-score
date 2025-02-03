@@ -20,6 +20,6 @@ pyproj>=2.2.0
 geopandas==0.14.4
 geopy
 sunposition
-shapely
 debugpy
 astropy
+python-dotenv
