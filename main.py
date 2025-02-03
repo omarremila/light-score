@@ -49,7 +49,10 @@ app = FastAPI()
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://sun-light-strength.up.railway.app/",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,6 +85,14 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/geocode")
+async def geocode(address: str):
+    lat, lng = geocode_address(address)
+    if not lat or not lng:
+        raise HTTPException(status_code=404, detail="Address not found")
+    return {"lat": lat, "lng": lng}
 
 
 @app.get("/light_score/")
@@ -152,6 +163,7 @@ async def get_light_score(
             "base_score": round(base_score, 1),
             "floor_bonus": min(floor * 2, 20) if floor > 1 else 0,
             "direction": direction,
+            "postal_code": postalCode,
             "sun_blockage": sun_blockage,
             "obstruction_factor": obstruction_factor,
         },
