@@ -235,6 +235,7 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 
         if not os.path.exists("data/3DMassingShapefile_2023_WGS84.shp"):
             # logger.error(f"Shapefile not found at {"data/3DMassingShapefile_2023_WGS84.shp"}")
+            logger.error(f"Shapefile not found :(")
             return []
 
         # Filter buildings roughly within the area first using lat/long columns
@@ -569,4 +570,4 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
