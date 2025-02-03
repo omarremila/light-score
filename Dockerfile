@@ -1,4 +1,3 @@
-# Base image selection
 FROM python:3.9-slim
 
 # Install system dependencies
@@ -12,27 +11,25 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Set GDAL environment variables
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
 ENV C_INCLUDE_PATH=/usr/include/gdal
 
-# Create and set working directory
 WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy the rest of the application
 COPY . .
 
-# Create data directory
 RUN mkdir -p /app/data
 
-# Expose port
-EXPOSE 8000
+# Use $PORT environment variable that Railway provides
+ENV PORT=8080
 
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Expose the port
+EXPOSE ${PORT}
+
+# Update the CMD to use the $PORT environment variable
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
