@@ -230,8 +230,8 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 
         # Load the shapefile
         buildings = gpd.read_file("data/3DMassingShapefile_2023_WGS84.shp")
-        logger.info(f"Attempting to load shapefile from: {'data/3DMassingShapefile_2023_WGS84.shp'}")
-        logger.info(f"Current working directory: {os.getcwd()}")
+        #logger.info(f"Attempting to load shapefile from: {'data/3DMassingShapefile_2023_WGS84.shp'}")
+        ##logger.info(f"Current working directory: {os.getcwd()}")
         logger.info(f"Directory contents: {os.listdir()}")
 
         if not os.path.exists("data/3DMassingShapefile_2023_WGS84.shp"):
