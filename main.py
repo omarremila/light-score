@@ -108,64 +108,39 @@ async def get_light_score(
     )
     logger.info(f"Floor: {floor}, Direction: {direction}")
 
-    if direction not in ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]:
+    # Validate direction input
+    if direction.upper() not in ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]:
         logger.error(f"Invalid direction: {direction}")
         raise HTTPException(status_code=400, detail="Invalid direction")
 
     # Geocode address
-    address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
-    lat, lng = geocode_address(address)
+    full_address = f"{streetNumber} {streetName}, {city}, {postalCode}, {country}"
+    lat, lng = geocode_address(full_address)
     logger.info(f"Geocoded coordinates: {lat}, {lng}")
 
     if not lat or not lng:
-        logger.error(f"Address not found: {address}")
+        logger.error(f"Address not found: {full_address}")
         raise HTTPException(status_code=404, detail="Address not found")
 
-    # Get nearby buildings
-    buildings = find_nearby_buildings(lat, lng)
-    buildings = filter_by_direction(buildings, lat, lng, direction)
-    logger.info(f"Found {len(buildings)} nearby buildings")
+    # Calculate dynamic light score (using the new function)
+    dynamic_score = calculate_dynamic_light_score(lat, lng, floor, direction)
 
-    # Get sun position
+    # Optionally, get extra details for the response
     sun_position = get_sun_position(lat, lng)
-    logger.info(
-        f"Sun position - Elevation: {sun_position['elevation']}°, Azimuth: {sun_position['azimuth']}°"
-    )
+    buildings = find_nearby_buildings(lat, lng)
 
-    # Calculate sun blockage
-    sun_blockage = calculate_sun_blockage(
-        sun_position["elevation"], sun_position["azimuth"], buildings, lat, lng, floor
-    )
-
-    # Calculate obstruction factor
-    obstruction_factor = calculate_obstruction_factor(buildings, floor)
-
-    # Calculate final score
-    base_score = 85 - (sun_blockage["blockage_percentage"] * 0.5)
-    final_score = calculate_final_score(
-        base_score, floor, direction, sun_blockage, obstruction_factor
-    )
-
-    logger.info(f"\nFinal Results:")
-    logger.info(f"Base Score: {base_score:.1f}")
-    logger.info(f"Sun Blockage: {sun_blockage['blockage_percentage']:.1f}%")
-    logger.info(f"Obstruction Factor: {obstruction_factor:.2f}")
-    logger.info(f"Final Light Score: {final_score}\n")
+    logger.info(f"\nFinal Light Score: {dynamic_score}\n")
     logger.info("=== Request Complete ===\n")
 
     return {
         "coordinates": {"lat": lat, "lng": lng},
-        "light_score": round(final_score, 1),
+        "light_score": dynamic_score,
         "details": {
-            "base_score": round(base_score, 1),
-            "floor_bonus": min(floor * 2, 20) if floor > 1 else 0,
+            "floor": floor,
             "direction": direction,
-            "postal_code": postalCode,
-            "sun_blockage": sun_blockage,
-            "obstruction_factor": obstruction_factor,
+            "sun_position": sun_position,
+            "building_data": buildings,
         },
-        "sun_position": sun_position,
-        "building_data": buildings,
     }
 
 
@@ -202,7 +177,6 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
 
 
 def geocode_address(address: str):
-
     api_key = os.getenv("LOCATIONIQ_API_KEY")
     logger.info(f"api key {api_key}")
     print(f"api key {api_key}", flush=True)
@@ -225,11 +199,6 @@ def geocode_address(address: str):
 def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
     """
     Find buildings within specified radius of a given location.
-
-    Args:
-        lat (float): Latitude of the search point
-        lng (float): Longitude of the search point
-        radius_meters (float): Search radius in meters (default 500m)
     """
     DEBUG = False
     try:
@@ -238,17 +207,13 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 
         # Load the shapefile
         buildings = gpd.read_file("data/3DMassingShapefile_2023_WGS84.shp")
-        # logger.info(f"Attempting to load shapefile from: {'data/3DMassingShapefile_2023_WGS84.shp'}")
-        ##logger.info(f"Current working directory: {os.getcwd()}")
         logger.info(f"Directory contents: {os.listdir()}")
 
         if not os.path.exists("data/3DMassingShapefile_2023_WGS84.shp"):
-            # logger.error(f"Shapefile not found at {"data/3DMassingShapefile_2023_WGS84.shp"}")
             logger.error(f"Shapefile not found :(")
             return []
 
-        # Filter buildings roughly within the area first using lat/long columns
-        # Convert radius to approximate degrees (1 degree ~ 111km at equator)
+        # Filter buildings roughly within the area using lat/long columns
         degree_radius = radius_meters / 111000
 
         mask = (
@@ -305,15 +270,6 @@ def find_nearby_buildings(lat: float, lng: float, radius_meters: float = 100):
 def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
     """
     Filter buildings list based on direction relative to origin point.
-
-    Args:
-        buildings_list: List of buildings with 'lat' and 'lng' keys
-        origin_lat: Latitude of reference point
-        origin_lng: Longitude of reference point
-        direction: "N", "NE", "E", "SE", "S", "SW", "W", or "NW"
-
-    Returns:
-        List of buildings in specified direction
     """
     filtered_buildings = []
 
@@ -324,22 +280,22 @@ def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
         is_in_direction = False
 
         # Simple direction checks
-        if direction == "N" and lat_diff > 0:
+        if direction.upper() == "N" and lat_diff > 0:
             is_in_direction = True
-        elif direction == "S" and lat_diff < 0:
+        elif direction.upper() == "S" and lat_diff < 0:
             is_in_direction = True
-        elif direction == "E" and lng_diff > 0:
+        elif direction.upper() == "E" and lng_diff > 0:
             is_in_direction = True
-        elif direction == "W" and lng_diff < 0:
+        elif direction.upper() == "W" and lng_diff < 0:
             is_in_direction = True
         # Diagonal checks
-        elif direction == "NE" and lat_diff > 0 and lng_diff > 0:
+        elif direction.upper() == "NE" and lat_diff > 0 and lng_diff > 0:
             is_in_direction = True
-        elif direction == "SE" and lat_diff < 0 and lng_diff > 0:
+        elif direction.upper() == "SE" and lat_diff < 0 and lng_diff > 0:
             is_in_direction = True
-        elif direction == "SW" and lat_diff < 0 and lng_diff < 0:
+        elif direction.upper() == "SW" and lat_diff < 0 and lng_diff < 0:
             is_in_direction = True
-        elif direction == "NW" and lat_diff > 0 and lng_diff < 0:
+        elif direction.upper() == "NW" and lat_diff > 0 and lng_diff < 0:
             is_in_direction = True
 
         if is_in_direction:
@@ -350,7 +306,7 @@ def filter_by_direction(buildings_list, origin_lat, origin_lng, direction):
 
 def get_sun_position(latitude: float, longitude: float, time: Time = None):
     """
-    Get both sun angle and azimuth.
+    Get both sun elevation and azimuth.
     """
     location = coord.EarthLocation(lon=longitude * u.deg, lat=latitude * u.deg)
 
@@ -367,16 +323,6 @@ def get_sun_position(latitude: float, longitude: float, time: Time = None):
 def calculate_obstruction_factor(buildings: list, floor: int) -> float:
     """
     Calculate the obstruction factor based on surrounding buildings.
-
-    Mathematical components:
-    1. Angular Height (θ) = arctan((building_height - observer_height) / distance)
-    2. Distance Weight (w) = 1 / (1 + d/100) where d is distance in meters
-    3. Total Obstruction = Σ(θ_i * w_i) for each building i
-    4. Obstruction Factor = max(0, min(1, 1 - (total_obstruction / 360)))
-
-    Parameters:
-        buildings: List of dictionaries containing building data
-        floor: Observer's floor number
     """
     if not buildings:
         return 1.0
@@ -404,17 +350,13 @@ def calculate_obstruction_factor(buildings: list, floor: int) -> float:
             distance = building["distance"]
 
             # 2. Calculate angular height (θ)
-            # Using arctangent to find angle between horizontal and line to top of building
             angle = math.degrees(math.atan2(building_height_diff, distance))
 
             # 3. Calculate distance weight
-            # Buildings closer have more impact (inverse relationship with distance)
             weight = 1 / (1 + distance / 100)  # Normalize to 0-1 range
 
-            # 4. Add weighted obstruction to total
             total_obstruction += angle * weight
 
-    # 5. Normalize to 0-1 range
     obstruction_factor = max(0, min(1, 1 - (total_obstruction / max_obstruction)))
     logger.info(f"\nFinal Calculations:")
     logger.info(f"Total obstruction: {total_obstruction:.2f}°")
@@ -438,20 +380,6 @@ def calculate_sun_blockage(
     )
     """
     Calculate sun blockage based on building positions and sun angle.
-    
-    Mathematical components:
-    1. Building Angular Height (θ_b) = arctan((building_height - observer_height) / distance)
-    2. Sun Angular Height (θ_s) = sun_angle
-    3. Building Azimuth (α_b) = arctan2(building_lng - observer_lng, building_lat - observer_lat)
-    4. Azimuth Difference (Δα) = |α_b - sun_azimuth|
-    5. Blockage Impact = (θ_b - θ_s) * (15 - Δα)/15 when Δα < 15°
-    
-    Parameters:
-        sun_angle: Solar elevation angle in degrees
-        sun_azimuth: Solar azimuth angle in degrees
-        buildings: List of buildings with height and position data
-        observer_lat/lng: Observer's coordinates
-        floor: Observer's floor number
     """
     try:
         blockage = {
@@ -467,17 +395,14 @@ def calculate_sun_blockage(
         observer_height = floor * floor_height
 
         for building in buildings:
-            # 1. Calculate relative height
             building_height_diff = building["height"] - observer_height
 
-            if building_height_diff > 0:  # Only consider taller buildings
+            if building_height_diff > 0:
                 distance = building["distance"]
 
-                # 2. Calculate building's angular height
                 building_angle = math.degrees(
                     math.atan2(building_height_diff, distance)
                 )
-                # 3. Calculate building's azimuth relative to observer
                 building_azimuth = calculate_azimuth(
                     building["lng"], building["lat"], observer_lat, observer_lng
                 )
@@ -486,26 +411,17 @@ def calculate_sun_blockage(
                 logger.info(
                     f"Building angle: {building_angle}°, Building azimuth: {str(building_azimuth)}°"
                 )
-                logger.info(
-                    f"Building angle : {calculate_azimuth(building['lng'], building['lat'], observer_lat, observer_lng)}"
-                )
-                # 4. Calculate azimuth difference``
                 azimuth_diff = abs(building_azimuth - sun_azimuth)
                 if azimuth_diff > 180:
                     azimuth_diff = 360 - azimuth_diff
 
-                # 5. If building is in sun's path (within 15 degrees)
                 if azimuth_diff < 15:
-                    # If building angle is greater than sun angle, sun is blocked
                     if building_angle > sun_angle:
                         blockage["is_blocked"] = True
-
-                        # Calculate blockage impact
                         impact = (building_angle - sun_angle) * (15 - azimuth_diff) / 15
                         blockage["blockage_percentage"] = min(
                             100, blockage["blockage_percentage"] + impact
                         )
-
                         blockage["blocking_buildings"].append(
                             {
                                 "distance": building["distance"],
@@ -536,47 +452,94 @@ def calculate_final_score(
     logger.info(f"Obstruction factor: {obstruction_factor}")
     """
     Calculate final light score incorporating all factors.
-    
-    Mathematical components:
-    1. Base Score Adjustment: base_score * obstruction_factor
-    2. Floor Bonus: min(floor * 2, 20)
-    3. Direction Factor: Multiplier based on orientation
-    4. Final Score = min(100, (adjusted_base_score * direction_factor) + floor_bonus)
-    
-    Parameters:
-        base_score: Initial score before adjustments
-        floor: Building floor number
-        direction: Orientation of the window
-        sun_blockage: Dictionary containing sun blockage calculations
-        obstruction_factor: Factor representing general obstruction
     """
-    # 1. Apply obstruction factor to base score
     adjusted_base_score = base_score * obstruction_factor
-
-    # 2. Calculate floor bonus (2 points per floor, max 20)
     floor_bonus = min(floor * 2, 20) if floor > 1 else 0
 
-    # 3. Direction factors (South-facing is optimal)
     direction_factors = {
-        "S": 1.0,  # South: 100% optimal
-        "SE": 0.9,  # Southeast: 90% optimal
-        "SW": 0.9,  # Southwest: 90% optimal
-        "E": 0.8,  # East: 80% optimal
-        "W": 0.8,  # West: 80% optimal
-        "NE": 0.7,  # Northeast: 70% optimal
-        "NW": 0.7,  # Northwest: 70% optimal
-        "N": 0.6,  # North: 60% optimal
+        "S": 1.0,
+        "SE": 0.9,
+        "SW": 0.9,
+        "E": 0.8,
+        "W": 0.8,
+        "NE": 0.7,
+        "NW": 0.7,
+        "N": 0.6,
     }
 
-    # 4. Calculate final score
     final_score = min(
-        100, (adjusted_base_score * direction_factors[direction]) + floor_bonus
+        100, (adjusted_base_score * direction_factors[direction.upper()]) + floor_bonus
     )
     return round(final_score, 1)
 
 
-if __name__ == "__main__":
+def calculate_dynamic_light_score(
+    lat: float, lng: float, floor: int, direction: str, search_radius: float = 100
+) -> float:
+    """
+    Calculate a dynamic light score using a baseline derived from the sun’s elevation,
+    then adjust it by sun blockage, surrounding building obstruction, a floor bonus,
+    and a directional multiplier.
 
+    Steps:
+      1. Get sun position.
+      2. Compute a potential irradiance proxy:
+             potential_irradiance = 1000 * sin(sun_elevation in radians)
+         which is mapped to a baseline score between 0 and 100.
+      3. Get nearby buildings.
+      4. Compute sun blockage and a shading penalty.
+      5. Compute an obstruction factor.
+      6. Add a floor bonus (2 points per floor, max 20) and multiply by a direction factor.
+      7. Clamp the final score between 0 and 100.
+    """
+    # 1. Get sun position
+    sun_position = get_sun_position(lat, lng)
+    sun_elevation = sun_position["elevation"]
+    sun_azimuth = sun_position["azimuth"]
+
+    # 2. Compute dynamic baseline from sun elevation (simple irradiance proxy)
+    if sun_elevation > 0:
+        potential_irradiance = 1000 * math.sin(math.radians(sun_elevation))
+    else:
+        potential_irradiance = 0
+    dynamic_baseline = (potential_irradiance / 1000) * 100  # Scale to 0-100
+
+    # 3. Get nearby buildings
+    buildings = find_nearby_buildings(lat, lng, radius_meters=search_radius)
+
+    # 4. Calculate sun blockage (shading penalty)
+    sun_blockage = calculate_sun_blockage(
+        sun_elevation, sun_azimuth, buildings, lat, lng, floor
+    )
+    shading_penalty = sun_blockage["blockage_percentage"]
+
+    # 5. Calculate the obstruction factor
+    obstruction_factor = calculate_obstruction_factor(buildings, floor)
+    adjusted_score = dynamic_baseline * obstruction_factor
+
+    # 6. Floor bonus and directional multiplier
+    floor_bonus = min(floor * 2, 20) if floor > 1 else 0
+    direction_factors = {
+        "S": 1.0,
+        "SE": 0.9,
+        "SW": 0.9,
+        "E": 0.8,
+        "W": 0.8,
+        "NE": 0.7,
+        "NW": 0.7,
+        "N": 0.6,
+    }
+    direction_multiplier = direction_factors.get(direction.upper(), 1.0)
+
+    # 7. Compute final score: subtract shading penalty, apply multiplier and bonus, and clamp to 0-100
+    final_score = (
+        (adjusted_score * direction_multiplier) - shading_penalty + floor_bonus
+    )
+    final_score = max(0, min(final_score, 100))
+    return round(final_score, 1)
+
+
+if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8080)
