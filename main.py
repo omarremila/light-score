@@ -52,6 +52,7 @@ app.add_middleware(
     allow_origins=[
         "https://sun-light-strength.up.railway.app",
         "http://localhost:5173",
+        "https://light-score-production.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
