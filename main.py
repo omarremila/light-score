@@ -49,11 +49,7 @@ app = FastAPI()
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://sun-light-strength.up.railway.app",
-        "http://localhost:5173",
-        "https://light-score-production.up.railway.app",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
